@@ -41,7 +41,26 @@ def main():
     if args.http:
         port = args.port or int(os.environ.get("PORT", config.MCP_SERVER_PORT))
         print(f"Starting iCloud MCP Server with Streamable HTTP on port {port}")
-        mcp.run(transport="http", host="0.0.0.0", port=port, path="/mcp")
+
+        # CORS-Middleware, damit Browser-Apps (z.B. eine eigenständige Web-App)
+        # den Server direkt ansprechen können, ohne über einen MCP-Client zu gehen.
+        import uvicorn
+        from starlette.middleware import Middleware
+        from starlette.middleware.cors import CORSMiddleware
+
+        app = mcp.http_app(
+            path="/mcp",
+            middleware=[
+                Middleware(
+                    CORSMiddleware,
+                    allow_origins=["*"],
+                    allow_methods=["GET", "POST", "OPTIONS"],
+                    allow_headers=["*"],
+                    expose_headers=["Mcp-Session-Id"],
+                )
+            ],
+        )
+        uvicorn.run(app, host="0.0.0.0", port=port)
     else:
         print("Starting iCloud MCP Server with stdio transport", file=sys.stderr)
         mcp.run(transport="stdio")
