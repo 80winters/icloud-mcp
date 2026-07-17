@@ -325,6 +325,24 @@ async def create_event(
     # Generate UID without dots (iCloud compatible)
     uid = f"{int(now.timestamp())}{now.microsecond}@icloud-mcp"
 
+    # Ganztägig erkennen: Start und Ende jeweils um Mitternacht, Spanne mindestens
+    # ein voller Tag (z.B. eine Task-Deadline, die als 00:00-00:00-am-nächsten-Tag
+    # übergeben wird). In dem Fall DTSTART/DTEND als VALUE=DATE statt DATE-TIME
+    # schreiben, sonst zeigt der Kalender ein 0-Minuten-Termin um Mitternacht statt
+    # eines echten Ganztägig-Balkens.
+    is_all_day = (
+        start_dt.hour == 0 and start_dt.minute == 0 and start_dt.second == 0
+        and end_dt.hour == 0 and end_dt.minute == 0 and end_dt.second == 0
+        and end_dt > start_dt
+    )
+
+    if is_all_day:
+        dtstart_line = f"DTSTART;VALUE=DATE:{start_dt.strftime('%Y%m%d')}"
+        dtend_line = f"DTEND;VALUE=DATE:{end_dt.strftime('%Y%m%d')}"
+    else:
+        dtstart_line = f"DTSTART:{start_dt.strftime('%Y%m%dT%H%M%S')}"
+        dtend_line = f"DTEND:{end_dt.strftime('%Y%m%dT%H%M%S')}"
+
     # Build proper iCalendar format (iCloud is very strict about formatting)
     ical_data = f"""BEGIN:VCALENDAR
 VERSION:2.0
@@ -333,8 +351,8 @@ CALSCALE:GREGORIAN
 BEGIN:VEVENT
 UID:{uid}
 DTSTAMP:{now.strftime('%Y%m%dT%H%M%SZ')}
-DTSTART:{start_dt.strftime('%Y%m%dT%H%M%S')}
-DTEND:{end_dt.strftime('%Y%m%dT%H%M%S')}
+{dtstart_line}
+{dtend_line}
 SUMMARY:{summary}
 STATUS:CONFIRMED
 SEQUENCE:0
@@ -442,9 +460,21 @@ async def update_event(
     # Update fields
     if summary:
         vevent.summary.value = summary
-    if start:
+    if start and end:
+        start_dt = datetime.fromisoformat(start)
+        end_dt = datetime.fromisoformat(end)
+        is_all_day = (
+            start_dt.hour == 0 and start_dt.minute == 0 and start_dt.second == 0
+            and end_dt.hour == 0 and end_dt.minute == 0 and end_dt.second == 0
+            and end_dt > start_dt
+        )
+        # vobject serialisiert ein reines date-Objekt automatisch als VALUE=DATE
+        # (ganztägig), ein datetime-Objekt als VALUE=DATE-TIME (Uhrzeit-Termin).
+        vevent.dtstart.value = start_dt.date() if is_all_day else start_dt
+        vevent.dtend.value = end_dt.date() if is_all_day else end_dt
+    elif start:
         vevent.dtstart.value = datetime.fromisoformat(start)
-    if end:
+    elif end:
         vevent.dtend.value = datetime.fromisoformat(end)
     if description is not None:
         if hasattr(vevent, 'description'):
